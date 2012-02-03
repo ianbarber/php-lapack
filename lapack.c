@@ -31,34 +31,35 @@ static zend_object_handlers lapack_object_handlers;
 /* {{{ static long* php_lapack_linearize_array(zval *inarray, int *m, int *n)
 Transform a PHP array into linear array of longs, and return dimensions 
 */
-static long* php_lapack_linearize_array(zval *inarray, int *m, int *n) 
+static double* php_lapack_linearize_array(zval *inarray, int *m, int *n) 
 {
-	long *outarray; 
+	double *outarray; 
 	zval **ppzval;
 	zval **ppinnerval;
 	int i;
 	
 	/* Set rows num */
-	m = zend_hash_num_elements(Z_ARRVAL_P(inarray));
+	*m = zend_hash_num_elements(Z_ARRVAL_P(inarray));
 	outarray = NULL;
 	i = 0;
-	
+
 	for (zend_hash_internal_pointer_reset(Z_ARRVAL_P(inarray));
 		 zend_hash_get_current_data(Z_ARRVAL_P(inarray), (void **) &ppzval) == SUCCESS;
 		 zend_hash_move_forward(Z_ARRVAL_P(inarray))) {
 		
 		if (Z_TYPE_PP(ppzval) == IS_ARRAY) {
 			
-			if(!outarray) {
+			if(outarray == NULL) {
 				/* Set columns num and alloc memory for value */
-				n = zend_hash_num_elements(Z_ARRVAL_PP(ppzval));
-				outarray = safe_emalloc(m * n, sizeof(int), 0);
+				*n = zend_hash_num_elements(Z_ARRVAL_PP(ppzval));
+				outarray = safe_emalloc(*m * *n, sizeof(double), 0);
 			}
 			
-			for (zend_hash_internal_pointer_reset(Z_ARRVAL_P(ppzval));
-				 zend_hash_get_current_data(Z_ARRVAL_P(ppzval), (void **) &ppinnerval) == SUCCESS;
-				 zend_hash_move_forward(Z_ARRVAL_P(ppzval))) {
-				outarray[i++] = Z_LVAL_PP(ppinnerval);
+			for (zend_hash_internal_pointer_reset(Z_ARRVAL_PP(ppzval));
+				 zend_hash_get_current_data(Z_ARRVAL_PP(ppzval), (void **) &ppinnerval) == SUCCESS;
+				 zend_hash_move_forward(Z_ARRVAL_PP(ppzval))) {
+					convert_to_double(*ppinnerval);
+					outarray[i++] = Z_DVAL_PP(ppinnerval);
 			}
 			
 		}
@@ -68,29 +69,28 @@ static long* php_lapack_linearize_array(zval *inarray, int *m, int *n)
 }
 /* }}} */
 
-/* {{{ static zval* php_lapack_reassemble_array(long *inarray, int m, int n)
+/* {{{ static zval* php_lapack_reassemble_array(zval *return_value, double *inarray, int m, int n)
 Loop through a long array and reassemble into a square php 2d array based on
 the height and width supplied
 */
-static zval* php_lapack_reassemble_array(long *inarray, int m, int n) 
+static void php_lapack_reassemble_array(zval *return_value, double *inarray, int m, int n, int stride) 
 {
-	zval *retval, *inner;
+	zval *inner;
 	int height, width;
 	height = width = 0;
 	
-	MAKE_STD_ZVAL(retval);
-	array_init(retval);
+	array_init(return_value);
 	
 	for( height = 0; height < m; height++ ) {
 		MAKE_STD_ZVAL(inner);
 		array_init(inner);
 		for( width = 0; width < n; width++ ) {
-			add_next_index_long(inner, inarray[(height*n)+width]);
+			add_next_index_double(inner, inarray[(height*stride)+width]);
 		}
-		add_next_index_zval(retval, inner);
+		add_next_index_zval(return_value, inner);
 	}
 	
-	return retval;
+	return;
 }
 /* }}} */
 	
@@ -102,10 +102,10 @@ Returns an array representing x. Expects arrays of arrays, and will
 return an array of arrays in the dimension B num cols x A num cols. 
 Uses QR or LQ factorisation on matrix A. 
 */
-PHP_METHOD(LapackLeastSquares, simple)
+PHP_METHOD(LapackLeastSquares, byFactorisation)
 {
 	zval *a, *b;
-	long *al, *bl;
+	double *al, *bl;
 	lapack_int info,m,n,lda,ldb,nrhs;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "aa", &a, &b) == FAILURE) {
@@ -115,13 +115,13 @@ PHP_METHOD(LapackLeastSquares, simple)
 	al = php_lapack_linearize_array(a, &m, &n);
 	bl = php_lapack_linearize_array(b, &m, &nrhs);
 	lda = n;
-	lba = nrhs;
+	ldb = nrhs;
 	
-	info = LPACKE_dgels(LAPACK_ROW_MAJOR, 'N', m, n, nrhs, *al, lda, *bl, ldb);
+	info = LAPACKE_dgels(LAPACK_ROW_MAJOR, 'N', m, n, nrhs, al, lda, bl, ldb);
 	
 	/* TODO: Error handling based on Info  */
 	
-	return_value = php_lapack_reassemble_array(bl, lda, ldb);
+	php_lapack_reassemble_array(return_value, bl, n, nrhs, ldb);
 	
 	efree(al);
 	efree(bl);
@@ -136,11 +136,13 @@ Returns an array representing x. Expects arrays of arrays, and will
 return an array of arrays in the dimension B num cols x A num cols. 
 Uses SVD with a divide and conquer algorithm. 
 */
-PHP_METHOD(LapackLeastSquares, withSVD)
+PHP_METHOD(LapackLeastSquares, bySVD)
 {
 	zval *a, *b;
-	long *al, *bl;
-	lapack_int info,m,n,lda,ldb,nrhs;
+	double *al, *bl, *s;
+	lapack_int info,m,n,lda,ldb,nrhs, rank;
+	/* Negative rcond means using default (machine precision) value */
+	double rcond = -1.0;
 
 	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "aa", &a, &b) == FAILURE) {
 		return;
@@ -149,16 +151,22 @@ PHP_METHOD(LapackLeastSquares, withSVD)
 	al = php_lapack_linearize_array(a, &m, &n);
 	bl = php_lapack_linearize_array(b, &m, &nrhs);
 	lda = n;
-	lba = nrhs;
+	ldb = nrhs;
+	s = safe_emalloc((n < m ? n : m), sizeof(double), 0);
 	
-	info = LPACKE_dgelsd(LAPACK_ROW_MAJOR, 'N', m, n, nrhs, *al, lda, *bl, ldb);
+	info = LAPACKE_dgelsd(LAPACK_ROW_MAJOR, m, n, nrhs, al, lda, bl, ldb, s, rcond, &rank);
 	
 	/* TODO: Error handling based on Info  */
+	/* Check for convergence */
+	if( info > 0 ) {
+		// it didn't converge
+	}
 	
-	return_value = php_lapack_reassemble_array(bl, lda, ldb);
+	php_lapack_reassemble_array(return_value, s, 1, (n < m ? n : m), ldb);
 	
 	efree(al);
 	efree(bl);
+	efree(s);
 	
 	return;
 }
@@ -177,9 +185,8 @@ ZEND_END_ARG_INFO()
 
 static zend_function_entry php_lapackls_class_methods[] =
 {
-	PHP_ME(LapackLeastSquares, __construct,	zmq_construct_args,	ZEND_ACC_PRIVATE|ZEND_ACC_CTOR)
-	PHP_ME(LapackLeastSquares, simple,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-	PHP_ME(LapackLeastSquares, withSvd,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(LapackLeastSquares, byFactorisation,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(LapackLeastSquares, bySVD,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	{ NULL, NULL, NULL }
 };
 

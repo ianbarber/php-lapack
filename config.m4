@@ -32,20 +32,21 @@ dnl Get PHP version depending on shared/static build
   done
   	
   if test "$LAPACK_OK" != "1"; then
-    AC_MSG_ERROR([Unable to find lapack.h])
+    AC_MSG_ERROR([Unable to find lapacke.h])
   fi
   
   AC_MSG_RESULT([found in $LAPACK_INC_DIR])
   
-  AC_MSG_CHECKING([for lapack shared libraries])
-  PHP_CHECK_LIBRARY(lapack, [
-    PHP_ADD_LIBRARY_WITH_PATH(lapack, $LAPACK_PREFIX/lib, LAPACK_SHARED_LIBADD)
+  AC_MSG_CHECKING([for lapacke shared libraries])
+  PHP_CHECK_LIBRARY(lapacke, LAPACKE_dgesv, [
+    PHP_ADD_LIBRARY_WITH_PATH(lapacke, $LAPACK_PREFIX/lib, LAPACK_SHARED_LIBADD)
     PHP_ADD_INCLUDE($LAPACK_INC_DIR)
   ],[
-    AC_MSG_ERROR([not found. Make sure that libsvm is installed])
+    AC_MSG_ERROR([not found. Make sure that lapacke is installed])
   ],[
-    LAPACK_SHARED_LIBADD -llacpack
+    LAPACK_SHARED_LIBADD -llapacke
   ])
+  
   
   PHP_NEW_EXTENSION(lapack, lapack.c, $ext_shared)
   AC_DEFINE(HAVE_LAPACK,1,[ ])
