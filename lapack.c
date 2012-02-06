@@ -96,13 +96,13 @@ static void php_lapack_reassemble_array(zval *return_value, double *inarray, int
 	
 /* --- Lapack Linear Least Squares Functions --- */
 
-/* {{{ array LapackLeastSquares::simple(array A, array B);
+/* {{{ array Lapack::leastSquaresByFactorisation(array A, array B);
 Solve the linear least squares problem, find min x in || B - Ax || 
 Returns an array representing x. Expects arrays of arrays, and will 
 return an array of arrays in the dimension B num cols x A num cols. 
 Uses QR or LQ factorisation on matrix A. 
 */
-PHP_METHOD(LapackLeastSquares, byFactorisation)
+PHP_METHOD(Lapack, leastSquaresByFactorisation)
 {
 	zval *a, *b;
 	double *al, *bl;
@@ -130,13 +130,13 @@ PHP_METHOD(LapackLeastSquares, byFactorisation)
 }
 /* }}} */
 
-/* {{{ array LapackLeastSquares::withSVD(array A, array B);
+/* {{{ array Lapack::leastSquaresBySVD(array A, array B);
 Solve the linear least squares problem, find min x in || B - Ax || 
 Returns an array representing x. Expects arrays of arrays, and will 
 return an array of arrays in the dimension B num cols x A num cols. 
 Uses SVD with a divide and conquer algorithm. 
 */
-PHP_METHOD(LapackLeastSquares, bySVD)
+PHP_METHOD(Lapack, leastSquaresBySVD)
 {
 	zval *a, *b;
 	double *al, *bl, *s;
@@ -159,16 +159,106 @@ PHP_METHOD(LapackLeastSquares, bySVD)
 	/* TODO: Error handling based on Info  */
 	/* Check for convergence */
 	if( info > 0 ) {
-		// it didn't converge
+		/* it didn't converge */
 	}
 	
-	php_lapack_reassemble_array(return_value, s, 1, (n < m ? n : m), ldb);
+	/* 
+		can assemble the singular values if we want:  
+		php_lapack_reassemble_array(return_value, s, 1, (n < m ? n : m), ldb);
+		for now we are just getting the LLS solution
+	*/
+	php_lapack_reassemble_array(return_value, bl, n, nrhs, ldb);
 	
 	efree(al);
 	efree(bl);
 	efree(s);
 	
 	return;
+}
+/* }}} */
+
+/* --- Lapack Eigenvalues and SVD Functions --- */
+
+/* {{{ array Lapack::eigenValues(array A);
+Calculate the eigenvalues for the given matrix.
+*/
+PHP_METHOD(Lapack, eigenValues) 
+{
+	zval *a, *inner;
+	double *al, *wr, *wi, *vl, *vr;
+	lapack_int info, m, n, lda, ldvl, ldvr;
+	int idx;
+	
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "a", &a) == FAILURE) {
+		return;
+	}
+	
+	al = php_lapack_linearize_array(a, &m, &n);
+	lda = n;
+	ldvl = n;
+	ldvr = n;
+	
+	wr = safe_emalloc((n < m ? n : m), sizeof(double), 0);
+	wi = safe_emalloc(ldvl * n, sizeof(double), 0);
+	vr = safe_emalloc(ldvl * n, sizeof(double), 0);
+	vl = safe_emalloc(ldvr * n, sizeof(double), 0);
+	
+	info = LAPACKE_dgeev( LAPACK_ROW_MAJOR, 'V', 'V', n, al, lda, wr, wi, vl, ldvl, vr, ldvr );
+	
+	array_init(return_value);
+	
+	/* Returning the eigenvalues alone for now */
+	for( idx = 0; idx < n; idx++ ) {
+		MAKE_STD_ZVAL(inner);
+		array_init(inner);
+		add_next_index_double(inner, wr[idx]);
+		if( wi[idx] != (float)0.0 ) {
+			add_next_index_double(inner, wi[idx]);
+		}
+		add_next_index_zval(return_value, inner);
+	}
+	
+	efree(al);
+	efree(wr);
+	efree(wi);
+	efree(vl);
+	efree(vr);	
+	
+	return;
+}
+/* }}} */
+
+/* {{{ array Lapack::singularValues(array A);
+Calculate the singular values of the matrix A. 
+*/
+PHP_METHOD(Lapack, singularValues) 
+{
+	zval *a;
+	double *al, *s, *u, *vt;
+	lapack_int info, m, n, lda, ldu, ldvt;
+	
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "a", &a) == FAILURE) {
+		return;
+	}
+	
+	al = php_lapack_linearize_array(a, &m, &n);
+	lda = n;
+	ldu = m;
+	ldvt = n;
+	s = safe_emalloc((n < m ? n : m), sizeof(double), 0);
+	u = safe_emalloc(ldu * m, sizeof(double), 0);
+	vt = safe_emalloc(ldvt*n, sizeof(double), 0);
+	
+	info = LAPACKE_dgesdd( LAPACK_ROW_MAJOR, 'S', m, n, al, lda, s, u, ldu, vt, ldvt );
+	
+	php_lapack_reassemble_array(return_value, s, 1, n, 1);
+	
+	efree(al);
+	efree(s);
+	efree(u);
+	efree(vt);
+	
+	return;	
 }
 /* }}} */
 
@@ -183,10 +273,17 @@ ZEND_BEGIN_ARG_INFO_EX(lapack_lls_args, 0, 0, 2)
 	ZEND_ARG_INFO(0, b)
 ZEND_END_ARG_INFO()
 
-static zend_function_entry php_lapackls_class_methods[] =
+ZEND_BEGIN_ARG_INFO_EX(lapack_values_args, 0, 0, 2)
+	ZEND_ARG_INFO(0, a)
+ZEND_END_ARG_INFO()
+
+
+static zend_function_entry php_lapack_class_methods[] =
 {
-	PHP_ME(LapackLeastSquares, byFactorisation,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-	PHP_ME(LapackLeastSquares, bySVD,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(Lapack, leastSquaresByFactorisation,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(Lapack, leastSquaresBySVD,			lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(Lapack, eigenValues,					lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(Lapack, singularValues,				lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	{ NULL, NULL, NULL }
 };
 
@@ -195,7 +292,7 @@ PHP_MINIT_FUNCTION(lapack)
 	zend_class_entry ce;
 	memcpy(&lapack_object_handlers, zend_get_std_object_handlers(), sizeof(zend_object_handlers));
 
-	INIT_CLASS_ENTRY(ce, "LapackLeastSquares", php_lapackls_class_methods);
+	INIT_CLASS_ENTRY(ce, "Lapack", php_lapack_class_methods);
 	ce.create_object = NULL;
 	lapack_object_handlers.clone_obj = NULL;
 	php_lapack_sc_entry = zend_register_internal_class(&ce TSRMLS_CC);

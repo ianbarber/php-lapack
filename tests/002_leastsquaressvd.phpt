@@ -1,5 +1,5 @@
 --TEST--
-Test the QR factorisation based linear least squares function
+Test SVD based linear least squares
 --SKIPIF--
 <?php
 if (!extension_loaded('lapack')) die('skip');
@@ -25,7 +25,7 @@ $b = array(
     array( 8.93,  -2.52),           
 );
 
-$result = Lapack::leastSquaresByFactorisation($a, $b);
+$result = Lapack::leastSquaresBySVD($a, $b);
 // round the result so we have a chance of matching in the face of float variance
 foreach($result as $k => $r) {
     foreach($r as $ik => $ir) {
