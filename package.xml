@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package packagerversion="1.9.0" version="2.0" xmlns="http://pear.php.net/dtd/package-2.0" xmlns:tasks="http://pear.php.net/dtd/tasks-1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://pear.php.net/dtd/tasks-1.0
+http://pear.php.net/dtd/tasks-1.0.xsd
+http://pear.php.net/dtd/package-2.0
+http://pear.php.net/dtd/package-2.0.xsd">
+ <name>lapack</name>
+ <channel>pecl.php.net</channel>
+ <summary>LAPACK Library</summary>
+ <description>LAPACK is a collection of efficient linear algebra routines
+ </description>
+ <lead>
+  <name>Ian Barber</name>
+  <user>ianb</user>
+  <email>ian.barber@gmail.co.uk</email>
+  <active>yes</active>
+ </lead>
+ <date>2012-02-06</date>
+ <time>19:30:00</time>
+ <version>
+  <release>0.1.0</release>
+  <api>0.1.0</api>
+ </version>
+ <stability>
+  <release>beta</release>
+  <api>beta</api>
+ </stability>
+ <license uri="http://www.php.net/license">PHP</license>
+ <notes>
+   - Added linear least square, eigenvalues, and singular values functions
+ </notes>
+ <contents>
+   <dir name="/">
+      <!-- Support files -->
+      <file name="config.m4" role="src" />
+
+      <!-- Headers -->
+      <file name="php_lapack.h" role="src" />
+      <file name="php_lapack_internal.h" role="src" />
+
+      <!-- Source files -->
+      <file name="lapack.c" role="src" />
+
+      <!-- Misc files -->
+      <file name="README" role="doc" />
+      <file name="CREDITS" role="doc" />
+      <file name="LICENSE" role="doc" />
+      
+      <!-- Tests -->
+      <dir name="tests">
+        <file name="001_leastsquares.phpt" role="test" />
+        <file name="002_leastsquaressvd.phpt" role="test" />
+        <file name="003_svd.phpt" role="test" />
+        <file name="004_eigenvectors.phpt" role="test" />
+      </dir>
+     </dir>
+ </contents>
+ <dependencies>
+  <required>
+   <php>
+    <min>5.3.0</min>
+   </php>
+   <pearinstaller>
+    <min>1.4.0</min>
+   </pearinstaller>
+  </required>
+ </dependencies>
+ <providesextension>lapack</providesextension>
+ <extsrcrelease />
+</package>
