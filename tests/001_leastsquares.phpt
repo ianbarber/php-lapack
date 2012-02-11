@@ -34,6 +34,17 @@ foreach($result as $k => $r) {
 }
 var_dump($result);
 
+try {
+    $result = Lapack::leastSquaresByFactorisation(array(array()), array(array()));
+} catch(Exception $e) {
+    echo $e->getMessage(), "\n";
+}
+
+try {
+    $result = Lapack::leastSquaresByFactorisation(array(), array());
+} catch(Lapackexception $e) {
+    echo $e->getMessage();
+}
 ?>
 --EXPECT--
 array(4) {
@@ -66,3 +77,5 @@ array(4) {
     float(0.14)
   }
 }
+Invalid input matrix - argument 1
+Invalid input matrix - argument 1

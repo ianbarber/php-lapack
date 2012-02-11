@@ -25,6 +25,7 @@ foreach($result as $k => $r) {
 }
 var_dump($result);
 
+
 ?>
 --EXPECT--
 array(5) {

@@ -23,8 +23,13 @@
 #include "ext/standard/info.h"
 
 static zend_class_entry *php_lapack_sc_entry;
-
+static zend_class_entry *php_lapack_exception_sc_entry;
 static zend_object_handlers lapack_object_handlers;
+
+#define LAPACK_THROW(message, code) \
+		zend_throw_exception(php_lapack_exception_sc_entry, message, (long)code TSRMLS_CC); \
+		return;
+
 
 /* --- Helper Functions --- */
 
@@ -36,32 +41,47 @@ static double* php_lapack_linearize_array(zval *inarray, int *m, int *n)
 	double *outarray; 
 	zval **ppzval;
 	zval **ppinnerval;
-	int i;
+	int i, j;
 	
 	/* Set rows num */
 	*m = zend_hash_num_elements(Z_ARRVAL_P(inarray));
+	*n = 0;
 	outarray = NULL;
+	j = 0;
 	i = 0;
 
-	for (zend_hash_internal_pointer_reset(Z_ARRVAL_P(inarray));
-		 zend_hash_get_current_data(Z_ARRVAL_P(inarray), (void **) &ppzval) == SUCCESS;
-		 zend_hash_move_forward(Z_ARRVAL_P(inarray))) {
+	if (*m > 0) {
+		for (zend_hash_internal_pointer_reset(Z_ARRVAL_P(inarray));
+			 zend_hash_get_current_data(Z_ARRVAL_P(inarray), (void **) &ppzval) == SUCCESS;
+			 zend_hash_move_forward(Z_ARRVAL_P(inarray))) {
 		
-		if (Z_TYPE_PP(ppzval) == IS_ARRAY) {
+			if (Z_TYPE_PP(ppzval) == IS_ARRAY) {
 			
-			if(outarray == NULL) {
-				/* Set columns num and alloc memory for value */
-				*n = zend_hash_num_elements(Z_ARRVAL_PP(ppzval));
-				outarray = safe_emalloc(*m * *n, sizeof(double), 0);
+				if (outarray == NULL) {
+					/* Set columns num and alloc memory for value */
+					*n = zend_hash_num_elements(Z_ARRVAL_PP(ppzval));
+					if(*n == 0) {
+						return outarray;
+					}
+					outarray = safe_emalloc(*m * *n, sizeof(double), 0);
+				} else if (zend_hash_num_elements(Z_ARRVAL_PP(ppzval)) != *n) {
+					/* The matrix is not valid */
+					efree(outarray);
+					return NULL;
+				}
+			
+				j = 0;
+				for (zend_hash_internal_pointer_reset(Z_ARRVAL_PP(ppzval));
+					 zend_hash_get_current_data(Z_ARRVAL_PP(ppzval), (void **) &ppinnerval) == SUCCESS;
+					 zend_hash_move_forward(Z_ARRVAL_PP(ppzval))) {
+						convert_to_double(*ppinnerval);
+						outarray[(j * *m) + i] = Z_DVAL_PP(ppinnerval);
+						j++;
+				}
+			
 			}
 			
-			for (zend_hash_internal_pointer_reset(Z_ARRVAL_PP(ppzval));
-				 zend_hash_get_current_data(Z_ARRVAL_PP(ppzval), (void **) &ppinnerval) == SUCCESS;
-				 zend_hash_move_forward(Z_ARRVAL_PP(ppzval))) {
-					convert_to_double(*ppinnerval);
-					outarray[i++] = Z_DVAL_PP(ppinnerval);
-			}
-			
+			i++;
 		}
 	}
 	
@@ -85,7 +105,7 @@ static void php_lapack_reassemble_array(zval *return_value, double *inarray, int
 		MAKE_STD_ZVAL(inner);
 		array_init(inner);
 		for( width = 0; width < n; width++ ) {
-			add_next_index_double(inner, inarray[(height*stride)+width]);
+			add_next_index_double(inner, inarray[height+(width*stride)]);
 		}
 		add_next_index_zval(return_value, inner);
 	}
@@ -93,7 +113,150 @@ static void php_lapack_reassemble_array(zval *return_value, double *inarray, int
 	return;
 }
 /* }}} */
+
+/* {{{ static double* php_lapack_identity( long m )
+Generate an identity linear identity matrix
+*/
+static double* php_lapack_identity( long m ) 
+{
+	int i, j;
+	double *outarray;
 	
+	outarray = safe_emalloc(m * m, sizeof(double), 0);
+	
+	for ( i = 0; i < m; i++ ) {
+		for ( j = 0; j < m; j++ ) {
+			outarray[(j*m)+i] = j == i ? 1.0 : 0.0;
+		}
+	}
+	
+	return outarray;
+}
+/* }}} */
+
+
+/* --- Lapack Matrix Utility Functions --- */
+
+/* {{{ array Lapack::pseudoInverse(array A);
+Find the pseudoinverse of a matrix A. 
+*/
+PHP_METHOD(Lapack, pseudoInverse)
+{
+	zval *a;
+	double *al;
+	lapack_int info,m,n,lda,ldb,nrhs;
+	lapack_int *ipiv;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "a", &a) == FAILURE) {
+		return;
+	}
+	
+	al = php_lapack_linearize_array(a, &m, &n);
+	if (al == NULL) {
+		LAPACK_THROW("Invalid input matrix - argument 1", 102);
+	}
+	
+	ipiv = safe_emalloc(m, sizeof(lapack_int), 0);
+	lda = m;
+	ldb = m;
+	nrhs = m;
+	
+	info = LAPACKE_dgetrf( LAPACK_COL_MAJOR, m, n, al, lda, ipiv);
+	if ( info == LAPACK_WORK_MEMORY_ERROR || info == LAPACK_TRANSPOSE_MEMORY_ERROR ) {
+		LAPACK_THROW("Not enough memory to calculate result", 101);
+	}
+	
+	info = LAPACKE_dgetri( LAPACK_COL_MAJOR, n, al, lda, ipiv);	
+	if ( info == LAPACK_WORK_MEMORY_ERROR || info == LAPACK_TRANSPOSE_MEMORY_ERROR ) {
+		LAPACK_THROW("Not enough memory to calculate result", 101);
+	} else if (info == 0) {
+		/* If success, fill the data. If not, there is an error so we return empty array */
+		php_lapack_reassemble_array(return_value, al, m, n, lda);
+	}
+	
+	efree(al);
+	efree(ipiv);
+	
+	return;
+}
+/* }}} */
+
+/* {{{ array Lapack::identity(int i);
+Return an identity matrix size i.
+*/
+PHP_METHOD(Lapack, identity)
+{
+	double *al;
+	long m;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &m) == FAILURE) {
+		return;
+	}
+	
+	if ( m < 1 ) {
+		LAPACK_THROW("Invalid input size - must be 1 or greater", 102);
+	}
+	
+	al = php_lapack_identity(m);
+	
+	php_lapack_reassemble_array(return_value, al, m, m, m);
+	
+	efree(al);
+	
+	return;
+}
+/* }}} */
+
+/* --- Lapack Linear Equation Functions --- */
+
+/* {{{ array Lapack::solveLinearEquation(array A, array B);
+This function computes the solution to the system of linear
+equations with a square matrix A and multiple
+right-hand sides B 
+*/
+PHP_METHOD(Lapack, solveLinearEquation)
+{
+	zval *a, *b;
+	double *al, *bl;
+	lapack_int info,m,n,lda,ldb,nrhs;
+	lapack_int *ipiv;
+
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "aa", &a, &b) == FAILURE) {
+		return;
+	}
+	
+	al = php_lapack_linearize_array(a, &m, &n);
+	if (al == NULL) {
+		LAPACK_THROW("Invalid input matrix - argument 1", 102);
+	}
+	
+	bl = php_lapack_linearize_array(b, &m, &nrhs);
+	if (bl == NULL) {
+		efree(al);
+		LAPACK_THROW("Invalid input matrix - argument 2", 102);
+	}
+	
+	ipiv = safe_emalloc(m, sizeof(lapack_int), 0);
+	lda = n;
+	ldb = n;
+	
+	info = LAPACKE_dgesv( LAPACK_COL_MAJOR, n, nrhs, al, lda, ipiv, bl, ldb);
+		
+	if ( info == LAPACK_WORK_MEMORY_ERROR || info == LAPACK_TRANSPOSE_MEMORY_ERROR ) {
+		LAPACK_THROW("Not enough memory to calculate result", 101);
+	} else if (info == 0) {
+		/* If success, fill the data. If not, there is an error so we return empty array */
+		php_lapack_reassemble_array(return_value, bl, n, nrhs, ldb);
+	}
+	
+	efree(al);
+	efree(bl);
+	efree(ipiv);
+	
+	return;
+}
+/* }}} */
+
 /* --- Lapack Linear Least Squares Functions --- */
 
 /* {{{ array Lapack::leastSquaresByFactorisation(array A, array B);
@@ -113,15 +276,29 @@ PHP_METHOD(Lapack, leastSquaresByFactorisation)
 	}
 	
 	al = php_lapack_linearize_array(a, &m, &n);
+	if (al == NULL) {
+		LAPACK_THROW("Invalid input matrix - argument 1", 102);
+	}
+	
 	bl = php_lapack_linearize_array(b, &m, &nrhs);
-	lda = n;
-	ldb = nrhs;
+	if (bl == NULL) {
+		efree(al);
+		LAPACK_THROW("Invalid input matrix - argument 2", 102);
+	}
 	
-	info = LAPACKE_dgels(LAPACK_ROW_MAJOR, 'N', m, n, nrhs, al, lda, bl, ldb);
+	/* For rowmajor it would be: */
+	/* lda = n; ldb = nrhs; */
+	lda = m;
+	ldb = m;
 	
-	/* TODO: Error handling based on Info  */
-	
-	php_lapack_reassemble_array(return_value, bl, n, nrhs, ldb);
+	info = LAPACKE_dgels( LAPACK_COL_MAJOR, 'N', m, n, nrhs, al, lda, bl, ldb);
+		
+	if ( info == LAPACK_WORK_MEMORY_ERROR || info == LAPACK_TRANSPOSE_MEMORY_ERROR ) {
+		LAPACK_THROW("Not enough memory to calculate result", 101);
+	} else if (info == 0) {
+		/* If success, fill the data. If not, there is an error so we return empty array */
+		php_lapack_reassemble_array(return_value, bl, n, nrhs, ldb);
+	}
 	
 	efree(al);
 	efree(bl);
@@ -140,7 +317,7 @@ PHP_METHOD(Lapack, leastSquaresBySVD)
 {
 	zval *a, *b;
 	double *al, *bl, *s;
-	lapack_int info,m,n,lda,ldb,nrhs, rank;
+	lapack_int info,m,n,lda,ldb,nrhs,rank;
 	/* Negative rcond means using default (machine precision) value */
 	double rcond = -1.0;
 
@@ -149,25 +326,35 @@ PHP_METHOD(Lapack, leastSquaresBySVD)
 	}
 	
 	al = php_lapack_linearize_array(a, &m, &n);
-	bl = php_lapack_linearize_array(b, &m, &nrhs);
-	lda = n;
-	ldb = nrhs;
-	s = safe_emalloc((n < m ? n : m), sizeof(double), 0);
-	
-	info = LAPACKE_dgelsd(LAPACK_ROW_MAJOR, m, n, nrhs, al, lda, bl, ldb, s, rcond, &rank);
-	
-	/* TODO: Error handling based on Info  */
-	/* Check for convergence */
-	if( info > 0 ) {
-		/* it didn't converge */
+	if (al == NULL) {
+		LAPACK_THROW("Invalid input matrix - argument 1", 102);
 	}
 	
-	/* 
-		can assemble the singular values if we want:  
-		php_lapack_reassemble_array(return_value, s, 1, (n < m ? n : m), ldb);
-		for now we are just getting the LLS solution
-	*/
-	php_lapack_reassemble_array(return_value, bl, n, nrhs, ldb);
+	bl = php_lapack_linearize_array(b, &m, &nrhs);
+	if (bl == NULL) {
+		efree(al);
+		LAPACK_THROW("Invalid input matrix - argument 2", 102);
+	}
+	
+	/* For rowmajor it would be: */
+	/* lda = n; ldb = nrhs; */
+	/* Maybe m n*/
+	lda = m;
+	ldb = m;
+	s = safe_emalloc(m, sizeof(double), 0);
+	
+	info = LAPACKE_dgelsd ( LAPACK_COL_MAJOR, m, n, nrhs, al, lda, bl, ldb, s, rcond, &rank );
+		
+	if ( info == LAPACK_WORK_MEMORY_ERROR || info == LAPACK_TRANSPOSE_MEMORY_ERROR ) {
+		LAPACK_THROW("Not enough memory to calculate result", 101);
+	} else if (info == 0) {
+		/* 
+			can assemble the singular values if we want:  
+			php_lapack_reassemble_array(return_value, s, 1, (n < m ? n : m), ldb);
+			for now we are just getting the LLS solution
+		*/
+		php_lapack_reassemble_array(return_value, bl, n, nrhs, ldb);
+	}
 	
 	efree(al);
 	efree(bl);
@@ -194,6 +381,12 @@ PHP_METHOD(Lapack, eigenValues)
 	}
 	
 	al = php_lapack_linearize_array(a, &m, &n);
+	if (al == NULL) {
+		LAPACK_THROW("Invalid input matrix", 102);
+	} else if ( m != n ) { 
+		LAPACK_THROW("Matrix must be square", 103);
+	}
+	
 	lda = n;
 	ldvl = n;
 	ldvr = n;
@@ -203,19 +396,23 @@ PHP_METHOD(Lapack, eigenValues)
 	vr = safe_emalloc(ldvl * n, sizeof(double), 0);
 	vl = safe_emalloc(ldvr * n, sizeof(double), 0);
 	
-	info = LAPACKE_dgeev( LAPACK_ROW_MAJOR, 'V', 'V', n, al, lda, wr, wi, vl, ldvl, vr, ldvr );
+	info = LAPACKE_dgeev( LAPACK_COL_MAJOR, 'V', 'V', n, al, lda, wr, wi, vl, ldvl, vr, ldvr );
 	
 	array_init(return_value);
 	
-	/* Returning the eigenvalues alone for now */
-	for( idx = 0; idx < n; idx++ ) {
-		MAKE_STD_ZVAL(inner);
-		array_init(inner);
-		add_next_index_double(inner, wr[idx]);
-		if( wi[idx] != (float)0.0 ) {
-			add_next_index_double(inner, wi[idx]);
+	if ( info == LAPACK_WORK_MEMORY_ERROR || info == LAPACK_TRANSPOSE_MEMORY_ERROR ) {
+		LAPACK_THROW("Not enough memory to calculate result", 101);
+	} else if (info == 0) {
+		/* Returning the eigenvalues alone for now */
+		for( idx = 0; idx < n; idx++ ) {
+			MAKE_STD_ZVAL(inner);
+			array_init(inner);
+			add_next_index_double(inner, wr[idx]);
+			if( wi[idx] != (float)0.0 ) {
+				add_next_index_double(inner, wi[idx]);
+			}
+			add_next_index_zval(return_value, inner);
 		}
-		add_next_index_zval(return_value, inner);
 	}
 	
 	efree(al);
@@ -242,16 +439,24 @@ PHP_METHOD(Lapack, singularValues)
 	}
 	
 	al = php_lapack_linearize_array(a, &m, &n);
-	lda = n;
+	if (al == NULL) {
+		LAPACK_THROW("Invalid input matrix", 102);
+	}
+	
+	lda = m;
 	ldu = m;
 	ldvt = n;
 	s = safe_emalloc((n < m ? n : m), sizeof(double), 0);
 	u = safe_emalloc(ldu * m, sizeof(double), 0);
 	vt = safe_emalloc(ldvt*n, sizeof(double), 0);
 	
-	info = LAPACKE_dgesdd( LAPACK_ROW_MAJOR, 'S', m, n, al, lda, s, u, ldu, vt, ldvt );
+	info = LAPACKE_dgesdd( LAPACK_COL_MAJOR, 'S', m, n, al, lda, s, u, ldu, vt, ldvt );
 	
-	php_lapack_reassemble_array(return_value, s, 1, n, 1);
+	if ( info == LAPACK_WORK_MEMORY_ERROR || info == LAPACK_TRANSPOSE_MEMORY_ERROR ) {
+		LAPACK_THROW("Not enough memory to calculate result", 101);
+	} else if (info == 0) {
+		php_lapack_reassemble_array(return_value, s, 1, n, 1);
+	}
 	
 	efree(al);
 	efree(s);
@@ -280,10 +485,13 @@ ZEND_END_ARG_INFO()
 
 static zend_function_entry php_lapack_class_methods[] =
 {
+	PHP_ME(Lapack, solveLinearEquation,			lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, leastSquaresByFactorisation,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, leastSquaresBySVD,			lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, eigenValues,					lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, singularValues,				lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(Lapack, identity,					lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(Lapack, pseudoInverse,				lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	{ NULL, NULL, NULL }
 };
 
@@ -296,6 +504,10 @@ PHP_MINIT_FUNCTION(lapack)
 	ce.create_object = NULL;
 	lapack_object_handlers.clone_obj = NULL;
 	php_lapack_sc_entry = zend_register_internal_class(&ce TSRMLS_CC);
+	
+	INIT_CLASS_ENTRY(ce, "Lapackexception", NULL);
+	php_lapack_exception_sc_entry = zend_register_internal_class_ex(&ce, zend_exception_get_default(TSRMLS_C), NULL TSRMLS_CC);
+	php_lapack_exception_sc_entry->ce_flags |= ZEND_ACC_FINAL;
 
 	return SUCCESS;
 }
