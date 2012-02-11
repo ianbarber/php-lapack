@@ -73,8 +73,14 @@ This should print (with some rounding to allow for float differences):
 Using the same setup we can do: 
 
 * $result = Lapack::leastSquaresBySVD($a, $b);
+* $result = Lapack::solveLinearEquation($a, $b);
 * $result = Lapack::singularValues($a);
 * $result = Lapack::eigenValues($a);
+* $result = Lapack::pseudoInverse($a);
+* $result = Lapack::identity(3); // return an identity matrix size n
+
+If there is a shortage of memory or the matrices are invalid, a Lapackexception will be thrown. 
+On other errors, the returned matrix will be an empty array. 
 
 Installation
 =================================

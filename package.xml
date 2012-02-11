@@ -14,7 +14,7 @@ http://pear.php.net/dtd/package-2.0.xsd">
   <email>ian.barber@gmail.co.uk</email>
   <active>yes</active>
  </lead>
- <date>2012-02-06</date>
+ <date>2012-02-11</date>
  <time>19:30:00</time>
  <version>
   <release>0.1.0</release>
@@ -27,6 +27,9 @@ http://pear.php.net/dtd/package-2.0.xsd">
  <license uri="http://www.php.net/license">PHP</license>
  <notes>
    - Added linear least square, eigenvalues, and singular values functions
+   - Added eigenvalues function
+   - Added linear equation functions
+   - Added inverse and identity functions
  </notes>
  <contents>
    <dir name="/">
@@ -41,7 +44,7 @@ http://pear.php.net/dtd/package-2.0.xsd">
       <file name="lapack.c" role="src" />
 
       <!-- Misc files -->
-      <file name="README" role="doc" />
+      <file name="README.md" role="doc" />
       <file name="CREDITS" role="doc" />
       <file name="LICENSE" role="doc" />
       
@@ -51,6 +54,9 @@ http://pear.php.net/dtd/package-2.0.xsd">
         <file name="002_leastsquaressvd.phpt" role="test" />
         <file name="003_svd.phpt" role="test" />
         <file name="004_eigenvectors.phpt" role="test" />
+        <file name="005_lineareqs.phpt" role="test" />
+        <file name="006_identity.phpt" role="test" />
+        <file name="007_pseudoinverse.phpt" role="test" />
       </dir>
      </dir>
  </contents>
