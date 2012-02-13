@@ -366,17 +366,20 @@ PHP_METHOD(Lapack, leastSquaresBySVD)
 
 /* --- Lapack Eigenvalues and SVD Functions --- */
 
-/* {{{ array Lapack::eigenValues(array A);
-Calculate the eigenvalues for the given matrix.
+/* {{{ array Lapack::eigenValues(array A, [array &leftEigenvectors, array &rightEigenvectors]);
+Calculate the eigenvalues for the given matrix. Can optionaly return the eigenvectors for the 
+matrix. 
 */
 PHP_METHOD(Lapack, eigenValues) 
 {
-	zval *a, *inner;
+	zval *a, *inner, *row, *col, *leig, *reig;
 	double *al, *wr, *wi, *vl, *vr;
 	lapack_int info, m, n, lda, ldvl, ldvr;
-	int idx;
+	int idx, j;
 	
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "a", &a) == FAILURE) {
+	leig = reig = NULL;
+	
+	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "a|a!a!", &a, &leig, &reig) == FAILURE) {
 		return;
 	}
 	
@@ -398,12 +401,13 @@ PHP_METHOD(Lapack, eigenValues)
 	
 	info = LAPACKE_dgeev( LAPACK_COL_MAJOR, 'V', 'V', n, al, lda, wr, wi, vl, ldvl, vr, ldvr );
 	
-	array_init(return_value);
+	array_init(return_value);	
 	
 	if ( info == LAPACK_WORK_MEMORY_ERROR || info == LAPACK_TRANSPOSE_MEMORY_ERROR ) {
 		LAPACK_THROW("Not enough memory to calculate result", 101);
 	} else if (info == 0) {
-		/* Returning the eigenvalues alone for now */
+		
+		/* Returning the eigenvalues alone */
 		for( idx = 0; idx < n; idx++ ) {
 			MAKE_STD_ZVAL(inner);
 			array_init(inner);
@@ -412,6 +416,68 @@ PHP_METHOD(Lapack, eigenValues)
 				add_next_index_double(inner, wi[idx]);
 			}
 			add_next_index_zval(return_value, inner);
+		}
+		
+		/* Return left eigenvectors */
+		if (leig != NULL && Z_TYPE_P(leig) == IS_ARRAY) { 
+			for( idx = 0; idx < n; idx++ ) {
+				MAKE_STD_ZVAL(row);
+				array_init(row);
+				j = 0;
+				while( j < n ) {
+					if( wi[j] != (float)0.0 ) {
+						MAKE_STD_ZVAL(col);
+						array_init(col);
+						add_next_index_double(col, vl[idx+j*ldvl]);
+						add_next_index_double(col, vl[idx+(j+1)*ldvl]);
+						add_next_index_zval(row, col);
+						MAKE_STD_ZVAL(col);
+						array_init(col);
+						add_next_index_double(col, vl[idx+j*ldvl]);
+						add_next_index_double(col, -vl[idx+(j+1)*ldvl]);
+						add_next_index_zval(row, col);
+						j += 2;
+					} else {
+						MAKE_STD_ZVAL(col);
+						array_init(col);
+						add_next_index_double(col, vl[idx+j*ldvl]);
+						add_next_index_zval(row, col);
+						j++;
+					}
+				}
+				add_next_index_zval(leig, row);
+			}
+		}
+		
+		/* Return right eigenvector */
+		if (reig != NULL && Z_TYPE_P(reig) == IS_ARRAY) {
+			for( idx = 0; idx < n; idx++ ) {
+				MAKE_STD_ZVAL(row);
+				array_init(row);
+				j = 0;
+				while( j < n ) {
+					if( wi[j] != (float)0.0 ) {
+						MAKE_STD_ZVAL(col);
+						array_init(col);
+						add_next_index_double(col, vr[idx+j*ldvr]);
+						add_next_index_double(col, vr[idx+(j+1)*ldvr]);
+						add_next_index_zval(row, col);
+						MAKE_STD_ZVAL(col);
+						array_init(col);
+						add_next_index_double(col, vr[idx+j*ldvr]);
+						add_next_index_double(col, -vr[idx+(j+1)*ldvr]);
+						add_next_index_zval(row, col);
+						j += 2;
+					} else {
+						MAKE_STD_ZVAL(col);
+						array_init(col);
+						add_next_index_double(col, vr[idx+j*ldvr]);
+						add_next_index_zval(row, col);
+						j++;
+					}
+				}
+				add_next_index_zval(reig, row);
+			}
 		}
 	}
 	
@@ -482,13 +548,19 @@ ZEND_BEGIN_ARG_INFO_EX(lapack_values_args, 0, 0, 2)
 	ZEND_ARG_INFO(0, a)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(lapack_eigen_args, 0, 0, 1)
+	ZEND_ARG_INFO(0, a)
+	ZEND_ARG_INFO(0, left)
+	ZEND_ARG_INFO(0, right)
+ZEND_END_ARG_INFO()
+
 
 static zend_function_entry php_lapack_class_methods[] =
 {
 	PHP_ME(Lapack, solveLinearEquation,			lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, leastSquaresByFactorisation,	lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, leastSquaresBySVD,			lapack_lls_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
-	PHP_ME(Lapack, eigenValues,					lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
+	PHP_ME(Lapack, eigenValues,					lapack_eigen_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, singularValues,				lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, identity,					lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
 	PHP_ME(Lapack, pseudoInverse,				lapack_values_args, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
