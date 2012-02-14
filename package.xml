@@ -5,8 +5,8 @@ http://pear.php.net/dtd/package-2.0
 http://pear.php.net/dtd/package-2.0.xsd">
  <name>lapack</name>
  <channel>pecl.php.net</channel>
- <summary>LAPACK Library</summary>
- <description>LAPACK is a collection of efficient linear algebra routines
+ <summary>Wrapper for the LAPACK linear algebra library.</summary>
+ <description>LAPACK (http://www.netlib.org/lapack) is written in Fortran 90 and provides routines for solving systems of simultaneous linear equations, least-squares solutions of linear systems of equations, eigenvalue problems, and singular value problems. This PHP extension makes use of the LAPACKE C bindings to LAPACK, and provides access to some of the 'driver' methods, allowing straightforward solving of linear algebra problems from PHP
  </description>
  <lead>
   <name>Ian Barber</name>
