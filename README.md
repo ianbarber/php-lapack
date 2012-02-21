@@ -97,7 +97,11 @@ From a limited survey, most distribution LAPACK packages do not include lapacke,
     make 
     sudo make install
     
-That should build LAPACK and the C wrapper (lapacke). Installing the extension is as simple as downloading the package, then: 
+That should build LAPACK and the C wrapper (lapacke). Installing the extension is as simple as installing from PECL:
+
+    pecl install lapack-beta
+
+Or if building from source, downloading the package, then: 
 
     phpize
     configure
