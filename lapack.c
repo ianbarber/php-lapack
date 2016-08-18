@@ -39,8 +39,8 @@ Transform a PHP array into linear array of longs, and return dimensions
 static double* php_lapack_linearize_array(zval *inarray, int *m, int *n) 
 {
 	double *outarray; 
-	zval **ppzval;
-	zval **ppinnerval;
+	zval *pzval;
+	zval *pinnerval;
 	int i, j;
 	
 	/* Set rows num */
@@ -52,30 +52,30 @@ static double* php_lapack_linearize_array(zval *inarray, int *m, int *n)
 
 	if (*m > 0) {
 		for (zend_hash_internal_pointer_reset(Z_ARRVAL_P(inarray));
-			 zend_hash_get_current_data(Z_ARRVAL_P(inarray), (void **) &ppzval) == SUCCESS;
+			 (pzval = zend_hash_get_current_data(Z_ARRVAL_P(inarray))) != NULL;
 			 zend_hash_move_forward(Z_ARRVAL_P(inarray))) {
 		
-			if (Z_TYPE_PP(ppzval) == IS_ARRAY) {
+			if (Z_TYPE_P(pzval) == IS_ARRAY) {
 			
 				if (outarray == NULL) {
 					/* Set columns num and alloc memory for value */
-					*n = zend_hash_num_elements(Z_ARRVAL_PP(ppzval));
+					*n = zend_hash_num_elements(Z_ARRVAL_P(pzval));
 					if(*n == 0) {
 						return outarray;
 					}
 					outarray = safe_emalloc(*m * *n, sizeof(double), 0);
-				} else if (zend_hash_num_elements(Z_ARRVAL_PP(ppzval)) != *n) {
+				} else if (zend_hash_num_elements(Z_ARRVAL_P(pzval)) != *n) {
 					/* The matrix is not valid */
 					efree(outarray);
 					return NULL;
 				}
 			
 				j = 0;
-				for (zend_hash_internal_pointer_reset(Z_ARRVAL_PP(ppzval));
-					 zend_hash_get_current_data(Z_ARRVAL_PP(ppzval), (void **) &ppinnerval) == SUCCESS;
-					 zend_hash_move_forward(Z_ARRVAL_PP(ppzval))) {
-						convert_to_double(*ppinnerval);
-						outarray[(j * *m) + i] = Z_DVAL_PP(ppinnerval);
+				for (zend_hash_internal_pointer_reset(Z_ARRVAL_P(pzval));
+					 (pinnerval = zend_hash_get_current_data(Z_ARRVAL_P(pzval))) != NULL;
+					 zend_hash_move_forward(Z_ARRVAL_P(pzval))) {
+						convert_to_double(pinnerval);
+						outarray[(j * *m) + i] = Z_DVAL_P(pinnerval);
 						j++;
 				}
 			
@@ -95,21 +95,22 @@ the height and width supplied
 */
 static void php_lapack_reassemble_array(zval *return_value, double *inarray, int m, int n, int stride) 
 {
-	zval *inner;
+	zval inner, result;
 	int height, width;
 	height = width = 0;
 	
-	array_init(return_value);
+	array_init(&result);
 	
 	for( height = 0; height < m; height++ ) {
-		MAKE_STD_ZVAL(inner);
-		array_init(inner);
+		array_init(&inner);
 		for( width = 0; width < n; width++ ) {
-			add_next_index_double(inner, inarray[height+(width*stride)]);
+			add_next_index_double(&inner, inarray[height+(width*stride)]);
 		}
-		add_next_index_zval(return_value, inner);
+		add_next_index_zval(&result, &inner);
 	}
 	
+	*return_value = result;
+	    
 	return;
 }
 /* }}} */
@@ -578,7 +579,7 @@ PHP_MINIT_FUNCTION(lapack)
 	php_lapack_sc_entry = zend_register_internal_class(&ce TSRMLS_CC);
 	
 	INIT_CLASS_ENTRY(ce, "Lapackexception", NULL);
-	php_lapack_exception_sc_entry = zend_register_internal_class_ex(&ce, zend_exception_get_default(TSRMLS_C), NULL TSRMLS_CC);
+	php_lapack_exception_sc_entry = zend_register_internal_class_ex(&ce, zend_exception_get_default(TSRMLS_C));
 	php_lapack_exception_sc_entry->ce_flags |= ZEND_ACC_FINAL;
 
 	return SUCCESS;
